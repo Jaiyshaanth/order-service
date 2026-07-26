@@ -1,0 +1,17 @@
+# =============================================================================
+# BASELINE Dockerfile — deliberately BAD.
+#
+# This is the most dramatic example in the whole project. The Go compiler
+# produces a single self-contained ~9 MB binary that needs NOTHING else to run.
+# This Dockerfile ships that binary inside an ~850 MB image containing the
+# entire Go toolchain, the standard library source, git, and your source code.
+# =============================================================================
+FROM golang:1.22
+
+WORKDIR /app
+COPY . .
+RUN go build -o /app/order-service .
+
+ENV PORT=3003
+EXPOSE 3003
+CMD ["/app/order-service"]

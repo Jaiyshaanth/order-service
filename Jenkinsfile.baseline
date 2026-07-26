@@ -1,0 +1,105 @@
+// BASELINE pipeline for order-service — sequential, uncached.
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '40'))
+  }
+
+  environment {
+    SERVICE   = 'order-service'
+    APP_PORT  = '3003'
+    IMAGE     = 'jaiyshaanth/order-service'
+    TOOL_IMG  = 'golang:1.22'
+  }
+
+  stages {
+    stage('Checkout') { steps { checkout scm; sh 'git log -1 --oneline' } }
+
+    stage('Install dependencies') {
+      steps {
+        sh '''
+          docker run --rm -v "$WORKSPACE:/work" -w /work \
+            -u $(id -u):$(id -g) -e HOME=/tmp \
+            -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache -e GOFLAGS=-mod=mod \
+            $TOOL_IMG sh -lc "go mod download && go vet ./..."
+        '''
+      }
+    }
+
+    stage('Lint') {
+      steps {
+        sh '''
+          docker run --rm -v "$WORKSPACE:/work" -w /work \
+            -u $(id -u):$(id -g) -e HOME=/tmp \
+            -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache \
+            $TOOL_IMG sh -lc "gofmt -l . | tee /tmp/fmt.out; test ! -s /tmp/fmt.out"
+        '''
+      }
+    }
+
+    stage('Unit tests') {
+      steps {
+        sh '''
+          docker run --rm -v "$WORKSPACE:/work" -w /work \
+            -u $(id -u):$(id -g) -e HOME=/tmp \
+            -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache \
+            $TOOL_IMG sh -lc "go test ./... -v -coverprofile=coverage.out"
+        '''
+      }
+    }
+
+    stage('Build image') {
+      steps {
+        sh 'docker build --no-cache -f Dockerfile.baseline -t $IMAGE:$BUILD_NUMBER .'
+        sh 'docker image inspect $IMAGE:$BUILD_NUMBER --format "BASELINE IMAGE SIZE: {{.Size}} bytes"'
+      }
+    }
+
+    stage('Security scan') {
+      steps {
+        sh '''
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+            --exit-code 0 --no-progress $IMAGE:$BUILD_NUMBER
+        '''
+      }
+    }
+
+    stage('Push image') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
+                                          usernameVariable: 'DH_USER',
+                                          passwordVariable: 'DH_PASS')]) {
+          sh '''
+            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+            docker push $IMAGE:$BUILD_NUMBER
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to dev') {
+      when { branch 'develop' }
+      steps {
+        sh '''
+          docker network inspect dev-net >/dev/null 2>&1 || docker network create dev-net
+          docker rm -f dev-$SERVICE >/dev/null 2>&1 || true
+          docker run -d --name dev-$SERVICE --network dev-net --restart unless-stopped \
+            -p 31003:$APP_PORT \
+            -e PORT=$APP_PORT -e ENVIRONMENT=dev -e APP_VERSION=$BUILD_NUMBER \
+            $IMAGE:$BUILD_NUMBER
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker image prune -f >/dev/null 2>&1 || true'
+      echo "Build ${env.BUILD_NUMBER} finished with result: ${currentBuild.currentResult}"
+    }
+  }
+}
