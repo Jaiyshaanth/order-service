@@ -24,7 +24,7 @@ pipeline {
           docker run --rm -v "$WORKSPACE:/work" -w /work \
             -u $(id -u):$(id -g) -e HOME=/tmp \
             -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache -e GOFLAGS=-mod=mod \
-            $TOOL_IMG sh -lc "go mod download && go vet ./..."
+            $TOOL_IMG sh -c "go mod download && go vet ./..."
         '''
       }
     }
@@ -35,7 +35,7 @@ pipeline {
           docker run --rm -v "$WORKSPACE:/work" -w /work \
             -u $(id -u):$(id -g) -e HOME=/tmp \
             -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache \
-            $TOOL_IMG sh -lc "gofmt -l . | tee /tmp/fmt.out; test ! -s /tmp/fmt.out"
+            $TOOL_IMG sh -c "gofmt -l . | tee /tmp/fmt.out; test ! -s /tmp/fmt.out"
         '''
       }
     }
@@ -46,7 +46,7 @@ pipeline {
           docker run --rm -v "$WORKSPACE:/work" -w /work \
             -u $(id -u):$(id -g) -e HOME=/tmp \
             -e GOPATH=/tmp/go -e GOCACHE=/tmp/gocache \
-            $TOOL_IMG sh -lc "go test ./... -v -coverprofile=coverage.out"
+            $TOOL_IMG sh -c "go test ./... -v -coverprofile=coverage.out"
         '''
       }
     }
